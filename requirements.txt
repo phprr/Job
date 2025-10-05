@@ -3,3 +3,4 @@ pandas==2.1.4
 openpyxl
 python-dotenv
 psycopg2-binary
+python-telegram-bot[webhooks]
