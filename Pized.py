@@ -4,17 +4,16 @@ import io
 import html
 from datetime import datetime
 import pandas as pd
-# !!! ПЕРЕКОНАЙТЕСЯ, ЩО ВИ ДОДАЛИ python-telegram-bot[webhooks] у requirements.txt !!!
 from telegram import Update, BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ConversationHandler, ContextTypes
 from dotenv import load_dotenv
 import psycopg2
 
+# Завантажуємо змінні середовища (для локального тестування)
 load_dotenv()
 
 # --- 1. КОНСТАНТИ ТА НАЛАШТУВАННЯ ---
 
-# !!! АКТУАЛЬНИЙ ТОКЕН ВАШОГО БОТА !!!
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 
 # КОНСТАНТИ РОЗРАХУНКУ
@@ -30,17 +29,18 @@ CMD_CANCEL = "vidm"      # Відмінити
 CMD_SWITCH_USER = "kor" # Обрати користувача
 CMD_USER_LIST = "ulist" # Список користувачів (Адмін)
 CMD_USER_DELETE = "udel" # Видалити користувача (Адмін)
+CMD_HOLIDAY = "vih" # !!! НОВА КОНСТАНТА: Вихідний
 
-# СПИСОК КОРИСТУВАЧІВ ДЛЯ ОБЛІКУ (використовується як ID у базі даних)
+# СПИСОК КОРИСТУВАЧІВ ДЛЯ ОБЛІКУ
 KNOWN_USERS = {
     'user_1': "Іра",
     'user_2': "Андрей",
     'user_3': "Паша"
-    # Додайте тут інші імена або коди користувачів, які вам потрібні
+    # Додайте тут інші імена або коди
 }
 
 # СТАНИ ДЛЯ ConversationHandler
-(USER_SELECT, GET_DATE, GET_START_TIME, GET_END_TIME, GET_LUNCH) = range(5)
+(USER_SELECT, GET_DATE, GET_START_TIME, GET_END_TIME, GET_LUNCH, GET_HOLIDAY_DATE) = range(6)
 
 # Налаштування логування
 logging.basicConfig(
@@ -52,16 +52,19 @@ logger = logging.getLogger(__name__)
 # --- 2. ЛОГІКА БАЗИ ДАНИХ (POSTGRESQL) ---
 
 def get_db_connection():
-    """Створює та повертає підключення до бази даних PostgreSQL за допомогою URL."""
+    """
+    Створює та повертає підключення до бази даних PostgreSQL. 
+    Використовує DATABASE_URL (найбільш надійний метод для Railway) як пріоритет.
+    """
     try:
-        # Спроба підключення через повний URL (найнадійніший метод для хостингу)
+        # 1. Підключення через повний URL (пріоритет для Railway)
         db_url = os.getenv("DATABASE_URL")
         if db_url:
             conn = psycopg2.connect(db_url)
             logger.info("Успішне підключення до PostgreSQL через DATABASE_URL.")
             return conn
         else:
-            # Якщо URL немає, повертаємося до окремих змінних (як резервний варіант)
+            # 2. Підключення через окремі змінні (резервний варіант)
             conn = psycopg2.connect(
                 host=os.getenv("PGHOST"),
                 database=os.getenv("PGDATABASE"),
@@ -76,7 +79,7 @@ def get_db_connection():
         return None
 
 def setup_database():
-    """Створює таблицю, якщо вона не існує, використовуючи PostgreSQL."""
+    """Створює таблицю, якщо вона не існує."""
     conn = get_db_connection()
     if conn is None:
         logger.error("Не вдалося ініціалізувати базу даних через відсутність підключення.")
@@ -86,7 +89,7 @@ def setup_database():
         cursor = conn.cursor()
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS records (
-                id SERIAL PRIMARY KEY, -- SERIAL для автоінкременту в PostgreSQL
+                id SERIAL PRIMARY KEY,
                 user_id TEXT,
                 work_date TEXT,
                 time_start TEXT,
@@ -164,7 +167,6 @@ def get_annual_records_by_month(user_code: str, year: str):
             WHERE user_id = %s AND work_date LIKE %s
             ORDER BY work_date ASC
         ''', (user_code, year + '-%'))
-        # Робимо list comprehension для сумісності з оригінальним кодом
         dates = [row[0] for row in cursor.fetchall()]
     except Exception as e:
         logger.error(f"Помилка отримання річних записів PostgreSQL: {e}")
@@ -217,7 +219,6 @@ def check_record_exists(user_code: str, date_str: str) -> bool:
         if conn:
             conn.close()
     return record_exists
-
 
 def delete_user_records(user_code: str):
     """Видаляє всі записи для конкретного коду користувача."""
@@ -412,7 +413,7 @@ async def get_lunch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         f"👤 **Користувач:** {KNOWN_USERS[current_user_code]}\n"
         f"📅 **Дата:** {data['work_date']}\n"
         f"🕒 **Зміна:** {data['time_start']} - {data['time_end']}\n"
-        f"🍕 **Вирахування:** Обід ({lunch_mins} хв) + Перерва (30 хв)\n"
+        f"🍕 **Вирахування:** Обід ({lunch_mins} хв) + Перерва ({BREAK_MINS} хв)\n"
         f"-----------------------------------\n"
         f"⏱️ **Чистий час:** **{net_hours} годин**\n"
         f"💰 **Оплата за день (${PAY_RATE}/год):** **{daily_pay}**"
@@ -424,6 +425,72 @@ async def get_lunch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     data.pop('time_start', None)
     data.pop('time_end', None)
     return ConversationHandler.END
+
+
+# -----------------------------------------------------------------
+# !!! НОВІ ОБРОБНИКИ ДЛЯ КОМАНДИ ВИХІДНИЙ !!!
+# -----------------------------------------------------------------
+
+async def start_holiday(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Запускає діалог для додавання вихідного."""
+
+    current_user_code = context.user_data.get('current_user')
+
+    if not current_user_code:
+        return await select_user_start(update, context)
+
+    user_name = KNOWN_USERS[current_user_code]
+
+    await update.message.reply_text(
+        f"🏖️ Облік для **{user_name}**.\n"
+        "Введіть **дату вихідного** (формат: РРРР-ММ-ДД, наприклад: 2025-10-15):"
+    )
+    return GET_HOLIDAY_DATE
+
+async def get_holiday_date_and_save(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Отримує дату, перевіряє її та зберігає запис з нульовими годинами."""
+    date_str = update.message.text.strip()
+
+    try:
+        datetime.strptime(date_str, "%Y-%m-%d")
+    except ValueError:
+        await update.message.reply_text("⛔️ Невірний формат дати. Спробуйте ще раз (РРРР-ММ-ДД):")
+        return GET_HOLIDAY_DATE
+
+    current_user_code = context.user_data.get('current_user')
+    if not current_user_code:
+        await update.message.reply_text(f"❌ Помилка: Користувач не обраний. Будь ласка, почніть з `/{CMD_SWITCH_USER}`.")
+        return ConversationHandler.END
+
+    if check_record_exists(current_user_code, date_str):
+        await update.message.reply_text(
+            f"❌ **Помилка:** Запис за дату **{date_str}** вже існує!\n"
+            f"Щоб додати вихідний, спочатку видаліть існуючий запис: `/{CMD_DELETE_DAY} {date_str}`"
+        )
+        return ConversationHandler.END
+
+    # Збереження запису з нульовими значеннями для Вихідного
+    save_record(
+        user_code=current_user_code, 
+        work_date=date_str, 
+        time_start="-", 
+        time_end="-",   
+        lunch_mins=0, 
+        net_hours=0.0, 
+        daily_pay=0.0
+    )
+
+    await update.message.reply_text(
+        f"✅ **Вихідний** для **{KNOWN_USERS[current_user_code]}** за дату **{date_str}** успішно додано до бази даних.\n"
+        f"Ця дата буде відображена у звіті Excel як неробочий день (0 годин/0 $).",
+        parse_mode='Markdown'
+    )
+    return ConversationHandler.END
+
+
+# -----------------------------------------------------------------
+# !!! ІНШІ ОБРОБНИКИ КОМАНД !!!
+# -----------------------------------------------------------------
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Завершує діалог, якщо користувач захоче перервати введення."""
@@ -657,12 +724,13 @@ async def set_bot_commands(application: Application):
     """Встановлює список команд для кнопки 'Меню' в Telegram."""
     commands = [
         BotCommand(CMD_SWITCH_USER, f"Змінити: Обрати поточного користувача ({' / '.join(KNOWN_USERS.values())})"),
-        BotCommand(CMD_USER_LIST, "Адмін: Показати список користувачів"),
-        BotCommand(CMD_USER_DELETE, "Адмін: Видалити всі записи користувача"),
+        BotCommand(CMD_HOLIDAY, f"Вихідний: Додати неробочий день (/{CMD_HOLIDAY} РРРР-ММ-ДД)"),
         BotCommand(CMD_START_DAY, "Почати облік нового робочого дня"),
         BotCommand(CMD_SUMMARY, f"Звіт: Отримати Excel-звіт за місяць (напр.: /{CMD_SUMMARY} 2024-12)"),
         BotCommand(CMD_YEAR_SUMMARY, f"Рік: Переглянути робочі дні за рік (напр.: /{CMD_YEAR_SUMMARY} 2025)"),
         BotCommand(CMD_DELETE_DAY, f"Видалити: Стерти запис за день (напр.: /{CMD_DELETE_DAY} 2025-01-01)"),
+        BotCommand(CMD_USER_LIST, "Адмін: Показати список користувачів"),
+        BotCommand(CMD_USER_DELETE, "Адмін: Видалити всі записи користувача"),
         BotCommand(CMD_CANCEL, "Скасувати поточне введення даних")
     ]
     await application.bot.set_my_commands(commands)
@@ -671,8 +739,7 @@ async def set_bot_commands(application: Application):
 def main() -> None:
     """Запуск бота."""
     
-    # Спроба ініціалізації БД (має викликати помилку, якщо дані не вірні)
-    # Якщо тут помилка, процес не повинен завершитися, а продовжити до run_webhook
+    # Спроба ініціалізації БД
     setup_database()
 
     application = Application.builder().token(TELEGRAM_TOKEN).build()
@@ -688,7 +755,7 @@ def main() -> None:
         fallbacks=[CommandHandler(CMD_CANCEL, cancel)],
     )
 
-    # ConversationHandler для вводу даних
+    # ConversationHandler для вводу робочих даних
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler(CMD_START_DAY, start)],
         states={
@@ -700,9 +767,20 @@ def main() -> None:
         fallbacks=[CommandHandler(CMD_CANCEL, cancel)],
     )
 
+    # ConversationHandler для додавання вихідного
+    holiday_handler = ConversationHandler(
+        entry_points=[CommandHandler(CMD_HOLIDAY, start_holiday)],
+        states={
+            GET_HOLIDAY_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_holiday_date_and_save)],
+        },
+        fallbacks=[CommandHandler(CMD_CANCEL, cancel)],
+    )
+
+
     # Додавання обробників
     application.add_handler(switch_handler)
     application.add_handler(conv_handler)
+    application.add_handler(holiday_handler) # ДОДАНО
 
     # Обробники звітів та видалення
     application.add_handler(CommandHandler(CMD_SUMMARY, monthly_summary_command))
@@ -722,7 +800,6 @@ def main() -> None:
     WEBHOOK_URL = os.environ.get("WEBHOOK_URL") 
     
     if not WEBHOOK_URL:
-        # Цей режим буде падати на Railway, але залишаємо для локального тестування
         logger.warning("WEBHOOK_URL не встановлено. Запуск у режимі Long Polling (Тільки для локального тестування!)")
         application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
     else:
