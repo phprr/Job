@@ -51,15 +51,14 @@ logger = logging.getLogger(__name__)
 # --- 2. ЛОГІКА БАЗИ ДАНИХ (POSTGRESQL) ---
 
 def get_db_connection():
-    """Створює та повертає підключення до бази даних PostgreSQL, використовуючи змінні середовища Railway."""
+    """Створює та повертає підключення до бази даних PostgreSQL."""
     try:
-        # Змінні PGHOST, PGUSER і т.д. автоматично зчитуються з оточення Railway
         conn = psycopg2.connect(
-            host=os.getenv("PGHOST"),
+            host=os.getenv("PGHOST", "postgres.railway.internal"), # Явно встановлюємо хост
             database=os.getenv("PGDATABASE"),
             user=os.getenv("PGUSER"),
             password=os.getenv("PGPASSWORD"),
-            port=os.getenv("PGPORT")
+            port=os.getenv("PGPORT", "5432") # Явно встановлюємо порт
         )
         return conn
     except Exception as e:
