@@ -52,18 +52,13 @@ logger = logging.getLogger(__name__)
 # --- 2. ЛОГІКА БАЗИ ДАНИХ (POSTGRESQL) ---
 
 def get_db_connection():
-    """
-    Створює та повертає підключення до бази даних PostgreSQL. 
-    Використовує явні host та port для запобігання помилки сокета.
-    """
+    """Створює та повертає підключення до бази даних PostgreSQL."""
     try:
         conn = psycopg2.connect(
-            # Явно вказуємо хост, ігноруючи потенційні проблеми з сокетами
             host=os.getenv("PGHOST"),
             database=os.getenv("PGDATABASE"),
             user=os.getenv("PGUSER"),
             password=os.getenv("PGPASSWORD"),
-            # Явно вказуємо порт
             port=os.getenv("PGPORT")
         )
         logger.info("Успішне підключення до PostgreSQL.")
