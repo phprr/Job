@@ -4,6 +4,7 @@ import io
 import html
 from datetime import datetime
 import pandas as pd
+# !!! ПЕРЕКОНАЙТЕСЯ, ЩО ВИ ДОДАЛИ python-telegram-bot[webhooks] у requirements.txt !!!
 from telegram import Update, BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ConversationHandler, ContextTypes
 from dotenv import load_dotenv
@@ -51,15 +52,21 @@ logger = logging.getLogger(__name__)
 # --- 2. ЛОГІКА БАЗИ ДАНИХ (POSTGRESQL) ---
 
 def get_db_connection():
-    """Створює та повертає підключення до бази даних PostgreSQL."""
+    """
+    Створює та повертає підключення до бази даних PostgreSQL. 
+    Використовує явні host та port для запобігання помилки сокета.
+    """
     try:
         conn = psycopg2.connect(
-            host=os.getenv("PGHOST", "postgres.railway.internal"), # Явно встановлюємо хост
+            # Явно вказуємо хост, ігноруючи потенційні проблеми з сокетами
+            host=os.getenv("PGHOST"),
             database=os.getenv("PGDATABASE"),
             user=os.getenv("PGUSER"),
             password=os.getenv("PGPASSWORD"),
-            port=os.getenv("PGPORT", "5432") # Явно встановлюємо порт
+            # Явно вказуємо порт
+            port=os.getenv("PGPORT")
         )
+        logger.info("Успішне підключення до PostgreSQL.")
         return conn
     except Exception as e:
         logger.error(f"Помилка підключення до PostgreSQL: {e}")
@@ -69,6 +76,7 @@ def setup_database():
     """Створює таблицю, якщо вона не існує, використовуючи PostgreSQL."""
     conn = get_db_connection()
     if conn is None:
+        logger.error("Не вдалося ініціалізувати базу даних через відсутність підключення.")
         return
 
     try:
@@ -86,6 +94,7 @@ def setup_database():
             )
         ''')
         conn.commit()
+        logger.info("Таблиця 'records' перевірена/створена успішно.")
     except Exception as e:
         logger.error(f"Помилка ініціалізації таблиць PostgreSQL: {e}")
     finally:
@@ -658,27 +667,63 @@ async def set_bot_commands(application: Application):
 
 def main() -> None:
     """Запуск бота."""
+    
+    # Спроба ініціалізації БД (має викликати помилку, якщо дані не вірні)
+    # Якщо тут помилка, процес не повинен завершитися, а продовжити до run_webhook
     setup_database()
 
     application = Application.builder().token(TELEGRAM_TOKEN).build()
 
     application.post_init = set_bot_commands
 
-    # ... (Весь інший код обробників залишається без змін) ...
+    # ConversationHandler для вибору користувача
+    switch_handler = ConversationHandler(
+        entry_points=[CommandHandler(CMD_SWITCH_USER, select_user_start)],
+        states={
+            USER_SELECT: [MessageHandler(filters.TEXT & ~filters.COMMAND, select_user)],
+        },
+        fallbacks=[CommandHandler(CMD_CANCEL, cancel)],
+    )
+
+    # ConversationHandler для вводу даних
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler(CMD_START_DAY, start)],
+        states={
+            GET_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_date)],
+            GET_START_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_start_time)],
+            GET_END_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_end_time)],
+            GET_LUNCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_lunch)],
+        },
+        fallbacks=[CommandHandler(CMD_CANCEL, cancel)],
+    )
+
+    # Додавання обробників
+    application.add_handler(switch_handler)
+    application.add_handler(conv_handler)
+
+    # Обробники звітів та видалення
+    application.add_handler(CommandHandler(CMD_SUMMARY, monthly_summary_command))
+    application.add_handler(CommandHandler(CMD_YEAR_SUMMARY, annual_summary_command))
+    application.add_handler(CommandHandler(CMD_DELETE_DAY, delete_day_command))
+
+    # Обробники керування користувачами
+    application.add_handler(CommandHandler(CMD_USER_LIST, user_list_command))
+    application.add_handler(CommandHandler(CMD_USER_DELETE, user_delete_command))
 
     # Обробник для логування всіх не-командних повідомлень
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, log_user_messages))
 
-    # --- ЗМІНЕНО: НАЛАШТУВАННЯ WEBHOOKS ДЛЯ RAILWAY ---
-    
-    # Railway надає цю змінну автоматично
+    # --- ЗАПУСК У РЕЖИМІ WEBHOOKS (ОБОВ'ЯЗКОВО ДЛЯ RAILWAY) ---
+
     PORT = int(os.environ.get("PORT", 8080)) 
     WEBHOOK_URL = os.environ.get("WEBHOOK_URL") 
     
     if not WEBHOOK_URL:
+        # Цей режим буде падати на Railway, але залишаємо для локального тестування
         logger.warning("WEBHOOK_URL не встановлено. Запуск у режимі Long Polling (Тільки для локального тестування!)")
         application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
     else:
+        # Успішний запуск у режимі Webhook
         logger.info(f"Запуск у режимі Webhook на порту {PORT} за адресою {WEBHOOK_URL}")
         
         application.run_webhook(
@@ -689,7 +734,6 @@ def main() -> None:
             allowed_updates=Update.ALL_TYPES,
             drop_pending_updates=True
         )
-
 
 if __name__ == '__main__':
     main()
