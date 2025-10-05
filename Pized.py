@@ -701,11 +701,29 @@ def main() -> None:
 
     # Обробник для логування всіх не-командних повідомлень
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, log_user_messages))
-
-    logger.info(f"Бот запущено. Надішліть /{CMD_SWITCH_USER} або /{CMD_START_DAY} для початку роботи.")
-
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
-
+# --- НАЛАШТУВАННЯ WEBHOOKS ДЛЯ RAILWAY ---
+    
+    # Railway надає цю змінну автоматично
+    PORT = int(os.environ.get("PORT", 8080)) 
+    # WEBHOOK_URL - це домен вашого Railway сервісу. Його потрібно додати як змінну!
+    WEBHOOK_URL = os.environ.get("WEBHOOK_URL") 
+    
+    if not WEBHOOK_URL:
+        # Якщо змінна WEBHOOK_URL не встановлена (або ви тестуєте локально), використовуємо Polling
+        logger.warning("WEBHOOK_URL не встановлено. Запуск у режимі Long Polling (Тільки для локального тестування!)")
+        application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+    else:
+        # Запуск у режимі Webhook
+        logger.info(f"Запуск у режимі Webhook на порту {PORT} за адресою {WEBHOOK_URL}")
+        
+        application.run_webhook(
+            listen="0.0.0.0",
+            port=PORT,
+            url_path=TELEGRAM_TOKEN, # Використовуємо токен як шлях для безпеки
+            webhook_url=WEBHOOK_URL + TELEGRAM_TOKEN,
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True
+        )
 
 if __name__ == '__main__':
     main()
