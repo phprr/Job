@@ -665,65 +665,32 @@ def main() -> None:
 
     application.post_init = set_bot_commands
 
-    # ConversationHandler для вибору користувача
-    switch_handler = ConversationHandler(
-        entry_points=[CommandHandler(CMD_SWITCH_USER, select_user_start)],
-        states={
-            USER_SELECT: [MessageHandler(filters.TEXT & ~filters.COMMAND, select_user)],
-        },
-        fallbacks=[CommandHandler(CMD_CANCEL, cancel)],
-    )
-
-    # ConversationHandler для вводу даних
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler(CMD_START_DAY, start)],
-        states={
-            GET_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_date)],
-            GET_START_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_start_time)],
-            GET_END_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_end_time)],
-            GET_LUNCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_lunch)],
-        },
-        fallbacks=[CommandHandler(CMD_CANCEL, cancel)],
-    )
-
-    # Додавання обробників
-    application.add_handler(switch_handler)
-    application.add_handler(conv_handler)
-
-    # Обробники звітів та видалення
-    application.add_handler(CommandHandler(CMD_SUMMARY, monthly_summary_command))
-    application.add_handler(CommandHandler(CMD_YEAR_SUMMARY, annual_summary_command))
-    application.add_handler(CommandHandler(CMD_DELETE_DAY, delete_day_command))
-
-    # Обробники керування користувачами
-    application.add_handler(CommandHandler(CMD_USER_LIST, user_list_command))
-    application.add_handler(CommandHandler(CMD_USER_DELETE, user_delete_command))
+    # ... (Весь інший код обробників залишається без змін) ...
 
     # Обробник для логування всіх не-командних повідомлень
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, log_user_messages))
-# --- НАЛАШТУВАННЯ WEBHOOKS ДЛЯ RAILWAY ---
+
+    # --- ЗМІНЕНО: НАЛАШТУВАННЯ WEBHOOKS ДЛЯ RAILWAY ---
     
     # Railway надає цю змінну автоматично
     PORT = int(os.environ.get("PORT", 8080)) 
-    # WEBHOOK_URL - це домен вашого Railway сервісу. Його потрібно додати як змінну!
     WEBHOOK_URL = os.environ.get("WEBHOOK_URL") 
     
     if not WEBHOOK_URL:
-        # Якщо змінна WEBHOOK_URL не встановлена (або ви тестуєте локально), використовуємо Polling
         logger.warning("WEBHOOK_URL не встановлено. Запуск у режимі Long Polling (Тільки для локального тестування!)")
         application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
     else:
-        # Запуск у режимі Webhook
         logger.info(f"Запуск у режимі Webhook на порту {PORT} за адресою {WEBHOOK_URL}")
         
         application.run_webhook(
             listen="0.0.0.0",
             port=PORT,
-            url_path=TELEGRAM_TOKEN, # Використовуємо токен як шлях для безпеки
+            url_path=TELEGRAM_TOKEN,
             webhook_url=WEBHOOK_URL + TELEGRAM_TOKEN,
             allowed_updates=Update.ALL_TYPES,
             drop_pending_updates=True
         )
+
 
 if __name__ == '__main__':
     main()

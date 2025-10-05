@@ -1,1 +1,1 @@
-web: python Pized.py git
+web: python Pized.py
