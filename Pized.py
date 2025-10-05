@@ -52,17 +52,25 @@ logger = logging.getLogger(__name__)
 # --- 2. ЛОГІКА БАЗИ ДАНИХ (POSTGRESQL) ---
 
 def get_db_connection():
-    """Створює та повертає підключення до бази даних PostgreSQL."""
+    """Створює та повертає підключення до бази даних PostgreSQL за допомогою URL."""
     try:
-        conn = psycopg2.connect(
-            host=os.getenv("PGHOST"),
-            database=os.getenv("PGDATABASE"),
-            user=os.getenv("PGUSER"),
-            password=os.getenv("PGPASSWORD"),
-            port=os.getenv("PGPORT")
-        )
-        logger.info("Успішне підключення до PostgreSQL.")
-        return conn
+        # Спроба підключення через повний URL (найнадійніший метод для хостингу)
+        db_url = os.getenv("DATABASE_URL")
+        if db_url:
+            conn = psycopg2.connect(db_url)
+            logger.info("Успішне підключення до PostgreSQL через DATABASE_URL.")
+            return conn
+        else:
+            # Якщо URL немає, повертаємося до окремих змінних (як резервний варіант)
+            conn = psycopg2.connect(
+                host=os.getenv("PGHOST"),
+                database=os.getenv("PGDATABASE"),
+                user=os.getenv("PGUSER"),
+                password=os.getenv("PGPASSWORD"),
+                port=os.getenv("PGPORT")
+            )
+            logger.info("Успішне підключення до PostgreSQL через окремі змінні.")
+            return conn
     except Exception as e:
         logger.error(f"Помилка підключення до PostgreSQL: {e}")
         return None
