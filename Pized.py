@@ -29,7 +29,7 @@ CMD_CANCEL = "vidm"      # Відмінити
 CMD_SWITCH_USER = "kor" # Обрати користувача
 CMD_USER_LIST = "ulist" # Список користувачів (Адмін)
 CMD_USER_DELETE = "udel" # Видалити користувача (Адмін)
-CMD_HOLIDAY = "vih" # !!! НОВА КОНСТАНТА: Вихідний
+CMD_HOLIDAY = "vih" # Вихідний
 
 # СПИСОК КОРИСТУВАЧІВ ДЛЯ ОБЛІКУ
 KNOWN_USERS = {
@@ -428,7 +428,7 @@ async def get_lunch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 # -----------------------------------------------------------------
-# !!! НОВІ ОБРОБНИКИ ДЛЯ КОМАНДИ ВИХІДНИЙ !!!
+# ОБРОБНИКИ ДЛЯ КОМАНДИ ВИХІДНИЙ
 # -----------------------------------------------------------------
 
 async def start_holiday(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -489,7 +489,7 @@ async def get_holiday_date_and_save(update: Update, context: ContextTypes.DEFAUL
 
 
 # -----------------------------------------------------------------
-# !!! ІНШІ ОБРОБНИКИ КОМАНД !!!
+# ОБРОБНИКИ ЗВІТІВ ТА ІНШИХ КОМАНД
 # -----------------------------------------------------------------
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -518,7 +518,7 @@ async def get_current_user_code(update: Update, context: ContextTypes.DEFAULT_TY
     return user_code
 
 async def monthly_summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обробник команди /zvit РРРР-ММ. Генерує та надсилає Excel-файл."""
+    """Обробник команди /zvit РРРР-ММ. Генерує та надсилає Excel-файл (без фарбування)."""
     user_code = await get_current_user_code(update, context)
     if not user_code:
         return
@@ -538,11 +538,13 @@ async def monthly_summary_command(update: Update, context: ContextTypes.DEFAULT_
         await update.message.reply_text(f"Немає записів за **{month_year_prefix}** для **{KNOWN_USERS[user_code]}**.")
         return
 
+    # 1. Створення DataFrame
     df = pd.DataFrame(
         records,
         columns=['Дата', 'Початок', 'Кінець', 'Обід (хв)', 'Чистий час (год)', 'Оплата ($)']
     )
 
+    # 2. Розрахунок підсумків
     total_hours = df['Чистий час (год)'].sum()
     total_pay = df['Оплата ($)'].sum()
 
@@ -555,9 +557,11 @@ async def monthly_summary_command(update: Update, context: ContextTypes.DEFAULT_
     df.loc[len(df)] = summary_row
     df = df.fillna('')
 
+    # 3. Експорт безпосередньо в Excel за допомогою pandas
     output = io.BytesIO()
     excel_filename = f"Zvit_{month_year_prefix}_{user_code}.xlsx"
 
+    # Використовуємо df.to_excel без openpyxl
     df.to_excel(output, index=False, sheet_name='Work Log')
     output.seek(0)
 
@@ -743,7 +747,6 @@ def main() -> None:
     setup_database()
 
     application = Application.builder().token(TELEGRAM_TOKEN).build()
-
     application.post_init = set_bot_commands
 
     # ConversationHandler для вибору користувача
@@ -777,10 +780,10 @@ def main() -> None:
     )
 
 
-    # Додавання обробників
+    # Додавання обробників: 1. Діалоги, 2. Окремі команди, 3. Catch-all (log_user_messages)
     application.add_handler(switch_handler)
     application.add_handler(conv_handler)
-    application.add_handler(holiday_handler) # ДОДАНО
+    application.add_handler(holiday_handler) 
 
     # Обробники звітів та видалення
     application.add_handler(CommandHandler(CMD_SUMMARY, monthly_summary_command))
@@ -791,7 +794,7 @@ def main() -> None:
     application.add_handler(CommandHandler(CMD_USER_LIST, user_list_command))
     application.add_handler(CommandHandler(CMD_USER_DELETE, user_delete_command))
 
-    # Обробник для логування всіх не-командних повідомлень
+    # Обробник для логування всіх не-командних повідомлень (ПОВИНЕН БУТИ ОСТАННІМ!)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, log_user_messages))
 
     # --- ЗАПУСК У РЕЖИМІ WEBHOOKS (ОБОВ'ЯЗКОВО ДЛЯ RAILWAY) ---
