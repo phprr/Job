@@ -311,12 +311,20 @@ async def select_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Початок діалогу - перевірка обраного користувача та запит дати."""
+    """
+    Початок діалогу /po. Перевіряє обраного користувача.
+    ВИПРАВЛЕНО: Якщо користувач не обраний, завершує діалог і просить запустити /kor.
+    """
 
     current_user_code = context.user_data.get('current_user')
 
     if not current_user_code:
-        return await select_user_start(update, context)
+        await update.message.reply_text(
+            f"❌ **Помилка:** Спочатку оберіть користувача для обліку: **/{CMD_SWITCH_USER}**",
+            parse_mode='Markdown'
+        )
+        # Завершуємо цей діалог, щоб не конфліктувати з іншим ConversationHandler
+        return ConversationHandler.END
 
     user_name = KNOWN_USERS[current_user_code]
 
@@ -437,7 +445,11 @@ async def start_holiday(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     current_user_code = context.user_data.get('current_user')
 
     if not current_user_code:
-        return await select_user_start(update, context)
+        await update.message.reply_text(
+            f"❌ **Помилка:** Спочатку оберіть користувача для обліку: **/{CMD_SWITCH_USER}**",
+            parse_mode='Markdown'
+        )
+        return ConversationHandler.END
 
     user_name = KNOWN_USERS[current_user_code]
 
@@ -561,7 +573,7 @@ async def monthly_summary_command(update: Update, context: ContextTypes.DEFAULT_
     output = io.BytesIO()
     excel_filename = f"Zvit_{month_year_prefix}_{user_code}.xlsx"
 
-    # Використовуємо df.to_excel без openpyxl
+    # Використовуємо df.to_excel
     df.to_excel(output, index=False, sheet_name='Work Log')
     output.seek(0)
 
