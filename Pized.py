@@ -18,7 +18,7 @@ TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 
 # КОНСТАНТИ РОЗРАХУНКУ
 PAY_RATE = 7.0   # Оплата за годину
-BREAK_MINS = 30  # Обов'язкова перерва (у хвилинах)
+# BREAK_MINS = 30  # ВИДАЛЕНО: Тепер користувач вводить загальний час перерв.
 
 # СКОРОЧЕНІ КОМАНДИ (УКРАЇНСЬКІ)
 CMD_START_DAY = "po"     # Почати
@@ -248,17 +248,22 @@ def delete_user_records(user_code: str):
 # --- 3. ЛОГІКА РОЗРАХУНКУ ЧАСУ ---
 
 def calculate_work_data(date_str, start_time_str, end_time_str, lunch_minutes):
-    """Розраховує чистий робочий час та оплату за день."""
+    """
+    Розраховує чистий робочий час та оплату за день.
+    Тепер lunch_minutes включає весь час перерв.
+    """
     try:
         start_dt = datetime.strptime(f"{date_str} {start_time_str}", "%Y-%m-%d %H:%M")
         end_dt = datetime.strptime(f"{date_str} {end_time_str}", "%Y-%m-%d %H:%M")
 
         total_duration_minutes = (end_dt - start_dt).total_seconds() / 60
-        total_deduction_minutes = lunch_minutes + BREAK_MINS
+        
+        # ВИПРАВЛЕННЯ: Віднімаємо лише загальний час, вказаний користувачем
+        total_deduction_minutes = lunch_minutes 
         net_minutes = total_duration_minutes - total_deduction_minutes
 
         if net_minutes < 0:
-            return None, None, "Помилка: Час перерви та обіду перевищує тривалість зміни. Перевірте дані."
+            return None, None, "Помилка: Загальний час перерви перевищує тривалість зміни. Перевірте дані."
 
         net_hours = round(net_minutes / 60, 2)
         daily_pay = round(net_hours * PAY_RATE, 2)
@@ -313,9 +318,7 @@ async def select_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
     Початок діалогу /po. Перевіряє обраного користувача.
-    ВИПРАВЛЕНО: Якщо користувач не обраний, завершує діалог і просить запустити /kor.
     """
-
     current_user_code = context.user_data.get('current_user')
 
     if not current_user_code:
@@ -323,7 +326,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             f"❌ **Помилка:** Спочатку оберіть користувача для обліку: **/{CMD_SWITCH_USER}**",
             parse_mode='Markdown'
         )
-        # Завершуємо цей діалог, щоб не конфліктувати з іншим ConversationHandler
         return ConversationHandler.END
 
     user_name = KNOWN_USERS[current_user_code]
@@ -380,19 +382,23 @@ async def get_end_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     end_time_str = update.message.text.strip()
     context.user_data['time_end'] = end_time_str
 
+    # ЗМІНЕНИЙ ТЕКСТ: Тепер просимо ввести загальний час перерв
     await update.message.reply_text(
         f"✅ Закінчення **{end_time_str}** прийнято.\n"
-        "Введіть **тривалість обіду у хвилинах** (наприклад: 60 або 90):"
+        "Введіть **загальну тривалість усіх перерв/обіду у хвилинах** (наприклад: 60, 90, або **0**, якщо перерви не було):"
     )
     return GET_LUNCH
 
 async def get_lunch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Отримання обіду, виконання розрахунків та збереження."""
+    """Отримання перерви, виконання розрахунків та збереження."""
 
     try:
         lunch_mins = int(update.message.text.strip())
+        if lunch_mins < 0:
+             await update.message.reply_text("⛔️ Час перерви не може бути від'ємним. Введіть 0 або позитивне число:")
+             return GET_LUNCH
     except ValueError:
-        await update.message.reply_text("⛔️ Введіть числове значення у хвилинах (наприклад, 60):")
+        await update.message.reply_text("⛔️ Введіть числове значення у хвилинах (наприклад, 60 або 0):")
         return GET_LUNCH
 
     # Збір усіх даних
@@ -421,7 +427,7 @@ async def get_lunch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         f"👤 **Користувач:** {KNOWN_USERS[current_user_code]}\n"
         f"📅 **Дата:** {data['work_date']}\n"
         f"🕒 **Зміна:** {data['time_start']} - {data['time_end']}\n"
-        f"🍕 **Вирахування:** Обід ({lunch_mins} хв) + Перерва ({BREAK_MINS} хв)\n"
+        f"🍕 **Вирахування (Обід/Перерви):** {lunch_mins} хв\n"
         f"-----------------------------------\n"
         f"⏱️ **Чистий час:** **{net_hours} годин**\n"
         f"💰 **Оплата за день (${PAY_RATE}/год):** **{daily_pay}**"
@@ -553,7 +559,7 @@ async def monthly_summary_command(update: Update, context: ContextTypes.DEFAULT_
     # 1. Створення DataFrame
     df = pd.DataFrame(
         records,
-        columns=['Дата', 'Початок', 'Кінець', 'Обід (хв)', 'Чистий час (год)', 'Оплата ($)']
+        columns=['Дата', 'Початок', 'Кінець', 'Перерва (хв)', 'Чистий час (год)', 'Оплата ($)']
     )
 
     # 2. Розрахунок підсумків
