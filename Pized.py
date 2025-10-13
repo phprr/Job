@@ -17,8 +17,8 @@ load_dotenv()
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 
 # КОНСТАНТИ РОЗРАХУНКУ
-PAY_RATE = 7.0   # Оплата за годину
-# BREAK_MINS = 30  # ВИДАЛЕНО: Тепер користувач вводить загальний час перерв.
+PAY_RATE = 7.0   # Оплата за годину (в Євро)
+CURRENCY_SYMBOL = "€" # Нова константа для символу валюти
 
 # СКОРОЧЕНІ КОМАНДИ (УКРАЇНСЬКІ)
 CMD_START_DAY = "po"     # Почати
@@ -141,7 +141,7 @@ def get_monthly_records(month_year_prefix: str, user_code: str):
             SELECT work_date, time_start, time_end, lunch_mins, net_hours, daily_pay
             FROM records
             WHERE user_id = %s AND work_date LIKE %s
-            ORDER BY work_date ASC
+            ORDER BY work_date ASC -- Сортування за датою в БД
         ''', (user_code, month_year_prefix + '%'))
 
         records = cursor.fetchall()
@@ -258,7 +258,7 @@ def calculate_work_data(date_str, start_time_str, end_time_str, lunch_minutes):
 
         total_duration_minutes = (end_dt - start_dt).total_seconds() / 60
         
-        # ВИПРАВЛЕННЯ: Віднімаємо лише загальний час, вказаний користувачем
+        # Віднімаємо лише загальний час, вказаний користувачем
         total_deduction_minutes = lunch_minutes 
         net_minutes = total_duration_minutes - total_deduction_minutes
 
@@ -382,7 +382,7 @@ async def get_end_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     end_time_str = update.message.text.strip()
     context.user_data['time_end'] = end_time_str
 
-    # ЗМІНЕНИЙ ТЕКСТ: Тепер просимо ввести загальний час перерв
+    # ТЕКСТ: Просимо ввести загальний час перерв
     await update.message.reply_text(
         f"✅ Закінчення **{end_time_str}** прийнято.\n"
         "Введіть **загальну тривалість усіх перерв/обіду у хвилинах** (наприклад: 60, 90, або **0**, якщо перерви не було):"
@@ -430,7 +430,7 @@ async def get_lunch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         f"🍕 **Вирахування (Обід/Перерви):** {lunch_mins} хв\n"
         f"-----------------------------------\n"
         f"⏱️ **Чистий час:** **{net_hours} годин**\n"
-        f"💰 **Оплата за день (${PAY_RATE}/год):** **{daily_pay}**"
+        f"💰 **Оплата за день ({CURRENCY_SYMBOL}{PAY_RATE}/год):** **{daily_pay} {CURRENCY_SYMBOL}**"
     )
     await update.message.reply_text(summary, parse_mode='Markdown')
 
@@ -500,7 +500,7 @@ async def get_holiday_date_and_save(update: Update, context: ContextTypes.DEFAUL
 
     await update.message.reply_text(
         f"✅ **Вихідний** для **{KNOWN_USERS[current_user_code]}** за дату **{date_str}** успішно додано до бази даних.\n"
-        f"Ця дата буде відображена у звіті Excel як неробочий день (0 годин/0 $).",
+        f"Ця дата буде відображена у звіті Excel як неробочий день (0 годин/0 {CURRENCY_SYMBOL}).",
         parse_mode='Markdown'
     )
     return ConversationHandler.END
@@ -536,7 +536,7 @@ async def get_current_user_code(update: Update, context: ContextTypes.DEFAULT_TY
     return user_code
 
 async def monthly_summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обробник команди /zvit РРРР-ММ. Генерує та надсилає Excel-файл (без фарбування)."""
+    """Обробник команди /zvit РРРР-ММ. Генерує та надсилає Excel-файл."""
     user_code = await get_current_user_code(update, context)
     if not user_code:
         return
@@ -557,25 +557,36 @@ async def monthly_summary_command(update: Update, context: ContextTypes.DEFAULT_
         return
 
     # 1. Створення DataFrame
+    # Нова назва стовпця з валютою
+    currency_column_name = f'Оплата ({CURRENCY_SYMBOL})'
     df = pd.DataFrame(
         records,
-        columns=['Дата', 'Початок', 'Кінець', 'Перерва (хв)', 'Чистий час (год)', 'Оплата ($)']
+        columns=['Дата', 'Початок', 'Кінець', 'Перерва (хв)', 'Чистий час (год)', currency_column_name]
     )
+    
+    # 2. **ЯВНЕ СОРТУВАННЯ ЗА ДАТОЮ** (для гарантії)
+    # Хоча в БД вже сортується, це захист на рівні Pandas.
+    df = df.sort_values(by='Дата', ascending=True)
 
-    # 2. Розрахунок підсумків
+    # 3. Розрахунок підсумків
     total_hours = df['Чистий час (год)'].sum()
-    total_pay = df['Оплата ($)'].sum()
-
+    total_pay = df[currency_column_name].sum()
+    
+    # Створення підсумкового рядка
     summary_row = {
         'Дата': f'РАЗОМ ({KNOWN_USERS[user_code]}):',
+        'Початок': '', 
+        'Кінець': '', 
+        'Перерва (хв)': '', 
         'Чистий час (год)': round(total_hours, 2),
-        'Оплата ($)': round(total_pay, 2)
+        currency_column_name: round(total_pay, 2)
     }
 
+    # Додавання підсумкового рядка до DataFrame
     df.loc[len(df)] = summary_row
-    df = df.fillna('')
+    
 
-    # 3. Експорт безпосередньо в Excel за допомогою pandas
+    # 4. Експорт безпосередньо в Excel
     output = io.BytesIO()
     excel_filename = f"Zvit_{month_year_prefix}_{user_code}.xlsx"
 
@@ -585,7 +596,7 @@ async def monthly_summary_command(update: Update, context: ContextTypes.DEFAULT_
 
     caption_text = (
         f"✅ Звіт по робочих змінах для **{KNOWN_USERS[user_code]}** за **{month_year_prefix}**.\n"
-        f"Сумарна оплата: **{round(total_pay, 2)} $**"
+        f"Сумарна оплата: **{round(total_pay, 2)} {CURRENCY_SYMBOL}**"
     )
 
     await context.bot.send_document(
