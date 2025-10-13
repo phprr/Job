@@ -54,7 +54,6 @@ logger = logging.getLogger(__name__)
 def get_db_connection():
     """
     Створює та повертає підключення до бази даних PostgreSQL. 
-    Використовує DATABASE_URL (найбільш надійний метод для Railway) як пріоритет.
     """
     try:
         # 1. Підключення через повний URL (пріоритет для Railway)
@@ -91,7 +90,7 @@ def setup_database():
             CREATE TABLE IF NOT EXISTS records (
                 id SERIAL PRIMARY KEY,
                 user_id TEXT,
-                work_date TEXT,
+                work_date TEXT, -- Зберігаємо як текст YYYY-MM-DD
                 time_start TEXT,
                 time_end TEXT,
                 lunch_mins INTEGER,
@@ -250,7 +249,6 @@ def delete_user_records(user_code: str):
 def calculate_work_data(date_str, start_time_str, end_time_str, lunch_minutes):
     """
     Розраховує чистий робочий час та оплату за день.
-    Тепер lunch_minutes включає весь час перерв.
     """
     try:
         start_dt = datetime.strptime(f"{date_str} {start_time_str}", "%Y-%m-%d %H:%M")
@@ -280,8 +278,7 @@ def calculate_work_data(date_str, start_time_str, end_time_str, lunch_minutes):
 # --- 4. ОБРОБНИКИ TELEGRAM-БОТА ---
 
 async def select_user_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Запускає діалог вибору користувача, використовуючи HTML для безпеки."""
-
+    # ... (код select_user_start) ...
     user_options = "\n".join([f"• <b>{html.escape(key)}</b> - {html.escape(name)}"
                              for key, name in KNOWN_USERS.items()])
 
@@ -294,7 +291,7 @@ async def select_user_start(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return USER_SELECT
 
 async def select_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Отримує код користувача та завершує діалог вибору."""
+    # ... (код select_user) ...
     user_code = update.message.text.strip().lower()
 
     if user_code not in KNOWN_USERS:
@@ -316,9 +313,7 @@ async def select_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """
-    Початок діалогу /po. Перевіряє обраного користувача.
-    """
+    # ... (код start) ...
     current_user_code = context.user_data.get('current_user')
 
     if not current_user_code:
@@ -337,11 +332,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return GET_DATE
 
 async def get_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Отримання дати та запит часу початку (з перевіркою дублікатів)."""
-    date_str = update.message.text.strip()
+    """Отримання дати, перевірка, стандартизація і запит часу початку."""
+    date_str_input = update.message.text.strip()
 
     try:
-        datetime.strptime(date_str, "%Y-%m-%d")
+        # Стандартизуємо дату: перетворюємо на об'єкт datetime, а потім назад у формат YYYY-MM-DD
+        # Це виправить '2025-10-1' на '2025-10-01'
+        date_obj = datetime.strptime(date_str_input, "%Y-%m-%d")
+        date_str_standard = date_obj.strftime("%Y-%m-%d") # Це гарантує формат з нулями спереду
     except ValueError:
         await update.message.reply_text("⛔️ Невірний формат дати. Спробуйте ще раз (РРРР-ММ-ДД):")
         return GET_DATE
@@ -351,23 +349,23 @@ async def get_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await update.message.reply_text(f"❌ Помилка: Користувач не обраний. Будь ласка, почніть з `/{CMD_SWITCH_USER}`.")
         return ConversationHandler.END
 
-    if check_record_exists(current_user_code, date_str):
+    if check_record_exists(current_user_code, date_str_standard):
         await update.message.reply_text(
-            f"❌ **Помилка:** Запис за дату **{date_str}** для користувача **{KNOWN_USERS[current_user_code]}** вже існує!\n\n"
-            f"Щоб додати новий запис, спочатку видаліть існуючий командою: `/{CMD_DELETE_DAY} {date_str}` або скасуйте введення: `/{CMD_CANCEL}`.",
+            f"❌ **Помилка:** Запис за дату **{date_str_standard}** для користувача **{KNOWN_USERS[current_user_code]}** вже існує!\n\n"
+            f"Щоб додати новий запис, спочатку видаліть існуючий командою: `/{CMD_DELETE_DAY} {date_str_standard}` або скасуйте введення: `/{CMD_CANCEL}`.",
             parse_mode='Markdown'
         )
         return ConversationHandler.END
 
-    context.user_data['work_date'] = date_str
+    context.user_data['work_date'] = date_str_standard # Зберігаємо стандартизовану дату
     await update.message.reply_text(
-        f"✅ Дату **{date_str}** прийнято.\n"
+        f"✅ Дату **{date_str_standard}** прийнято.\n"
         "Введіть **час початку** роботи (формат: ГГ:ХХ, наприклад: 09:00):"
     )
     return GET_START_TIME
 
 async def get_start_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Отримання часу початку та запит часу завершення."""
+    # ... (код get_start_time) ...
     start_time_str = update.message.text.strip()
     context.user_data['time_start'] = start_time_str
 
@@ -378,7 +376,7 @@ async def get_start_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     return GET_END_TIME
 
 async def get_end_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Отримання часу завершення та запит обіду."""
+    # ... (код get_end_time) ...
     end_time_str = update.message.text.strip()
     context.user_data['time_end'] = end_time_str
 
@@ -390,8 +388,7 @@ async def get_end_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return GET_LUNCH
 
 async def get_lunch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Отримання перерви, виконання розрахунків та збереження."""
-
+    # ... (код get_lunch) ...
     try:
         lunch_mins = int(update.message.text.strip())
         if lunch_mins < 0:
@@ -418,7 +415,7 @@ async def get_lunch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await update.message.reply_text(f"❌ **Помилка!** {error_msg}\nСпробуйте почати знову: /{CMD_START_DAY}")
         return ConversationHandler.END
 
-    # Збереження даних у базу
+    # Збереження даних у базу (data['work_date'] вже стандартизовано в get_date)
     save_record(current_user_code, data['work_date'], data['time_start'], data['time_end'], lunch_mins, net_hours, daily_pay)
 
     # Надсилання результату
@@ -446,8 +443,7 @@ async def get_lunch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 # -----------------------------------------------------------------
 
 async def start_holiday(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Запускає діалог для додавання вихідного."""
-
+    # ... (код start_holiday) ...
     current_user_code = context.user_data.get('current_user')
 
     if not current_user_code:
@@ -466,11 +462,13 @@ async def start_holiday(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     return GET_HOLIDAY_DATE
 
 async def get_holiday_date_and_save(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Отримує дату, перевіряє її та зберігає запис з нульовими годинами."""
-    date_str = update.message.text.strip()
+    """Отримує дату, перевіряє її, стандартизує та зберігає запис з нульовими годинами."""
+    date_str_input = update.message.text.strip()
 
     try:
-        datetime.strptime(date_str, "%Y-%m-%d")
+        # Стандартизуємо дату
+        date_obj = datetime.strptime(date_str_input, "%Y-%m-%d")
+        date_str_standard = date_obj.strftime("%Y-%m-%d")
     except ValueError:
         await update.message.reply_text("⛔️ Невірний формат дати. Спробуйте ще раз (РРРР-ММ-ДД):")
         return GET_HOLIDAY_DATE
@@ -480,17 +478,17 @@ async def get_holiday_date_and_save(update: Update, context: ContextTypes.DEFAUL
         await update.message.reply_text(f"❌ Помилка: Користувач не обраний. Будь ласка, почніть з `/{CMD_SWITCH_USER}`.")
         return ConversationHandler.END
 
-    if check_record_exists(current_user_code, date_str):
+    if check_record_exists(current_user_code, date_str_standard):
         await update.message.reply_text(
-            f"❌ **Помилка:** Запис за дату **{date_str}** вже існує!\n"
-            f"Щоб додати вихідний, спочатку видаліть існуючий запис: `/{CMD_DELETE_DAY} {date_str}`"
+            f"❌ **Помилка:** Запис за дату **{date_str_standard}** вже існує!\n"
+            f"Щоб додати вихідний, спочатку видаліть існуючий запис: `/{CMD_DELETE_DAY} {date_str_standard}`"
         )
         return ConversationHandler.END
 
     # Збереження запису з нульовими значеннями для Вихідного
     save_record(
         user_code=current_user_code, 
-        work_date=date_str, 
+        work_date=date_str_standard, 
         time_start="-", 
         time_end="-",   
         lunch_mins=0, 
@@ -499,7 +497,7 @@ async def get_holiday_date_and_save(update: Update, context: ContextTypes.DEFAUL
     )
 
     await update.message.reply_text(
-        f"✅ **Вихідний** для **{KNOWN_USERS[current_user_code]}** за дату **{date_str}** успішно додано до бази даних.\n"
+        f"✅ **Вихідний** для **{KNOWN_USERS[current_user_code]}** за дату **{date_str_standard}** успішно додано до бази даних.\n"
         f"Ця дата буде відображена у звіті Excel як неробочий день (0 годин/0 {CURRENCY_SYMBOL}).",
         parse_mode='Markdown'
     )
@@ -511,7 +509,7 @@ async def get_holiday_date_and_save(update: Update, context: ContextTypes.DEFAUL
 # -----------------------------------------------------------------
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Завершує діалог, якщо користувач захоче перервати введення."""
+    # ... (код cancel) ...
     await update.message.reply_text("🚫 Введення скасовано.")
 
     # Зберігаємо обраного користувача, але очищуємо дані форми
@@ -525,7 +523,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 async def get_current_user_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str | None:
-    """Перевіряє, чи обраний користувач, і повідомляє про необхідність вибору."""
+    # ... (код get_current_user_code) ...
     user_code = context.user_data.get('current_user')
     if not user_code:
         await context.bot.send_message(
@@ -536,7 +534,7 @@ async def get_current_user_code(update: Update, context: ContextTypes.DEFAULT_TY
     return user_code
 
 async def monthly_summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обробник команди /zvit РРРР-ММ. Генерує та надсилає Excel-файл."""
+    """Обробник команди /zvit РРРР-ММ. Генерує та надсилає Excel-файл з коректним сортуванням."""
     user_code = await get_current_user_code(update, context)
     if not user_code:
         return
@@ -557,16 +555,26 @@ async def monthly_summary_command(update: Update, context: ContextTypes.DEFAULT_
         return
 
     # 1. Створення DataFrame
-    # Нова назва стовпця з валютою
     currency_column_name = f'Оплата ({CURRENCY_SYMBOL})'
     df = pd.DataFrame(
         records,
         columns=['Дата', 'Початок', 'Кінець', 'Перерва (хв)', 'Чистий час (год)', currency_column_name]
     )
     
-    # 2. **ЯВНЕ СОРТУВАННЯ ЗА ДАТОЮ** (для гарантії)
-    # Хоча в БД вже сортується, це захист на рівні Pandas.
-    df = df.sort_values(by='Дата', ascending=True)
+    # 2. **КОРЕКТНЕ СОРТУВАННЯ ЗА ДАТОЮ**
+    # Перетворюємо стовпець "Дата" на тип datetime, щоб уникнути алфавітного сортування
+    try:
+        df['Дата'] = pd.to_datetime(df['Дата'])
+    except Exception as e:
+        logger.warning(f"Неможливо перетворити стовпець 'Дата' на datetime (можливо, через '-' для вихідних). Спробуємо перетворити некоректні дати на NaT: {e}")
+        # Якщо є вихідні з '-', використовуємо errors='coerce'
+        df['Дата'] = pd.to_datetime(df['Дата'], errors='coerce') 
+
+    # Сортуємо за коректним типом (datetime)
+    df = df.sort_values(by='Дата', ascending=True, na_position='last')
+    
+    # Повертаємо формат дати назад у рядок (YYYY-MM-DD), щоб "-" для вихідних також коректно відображався
+    df['Дата'] = df['Дата'].apply(lambda x: x.strftime('%Y-%m-%d') if pd.notna(x) else '-')
 
     # 3. Розрахунок підсумків
     total_hours = df['Чистий час (год)'].sum()
@@ -610,7 +618,7 @@ async def monthly_summary_command(update: Update, context: ContextTypes.DEFAULT_
     await update.message.reply_text("Звіт успішно сформовано та надіслано!")
 
 async def annual_summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обробник команди /rik РРРР. Показує активні місяці та дні."""
+    # ... (код annual_summary_command) ...
     user_code = await get_current_user_code(update, context)
     if not user_code:
         return
@@ -658,14 +666,16 @@ async def annual_summary_command(update: Update, context: ContextTypes.DEFAULT_T
     await update.message.reply_text(final_response, parse_mode='Markdown')
 
 async def delete_day_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обробник команди /vid РРРР-ММ-ДД. Видаляє запис."""
+    # ... (код delete_day_command) ...
     user_code = await get_current_user_code(update, context)
     if not user_code:
         return
 
     try:
-        date_str_to_delete = context.args[0]
-        datetime.strptime(date_str_to_delete, "%Y-%m-%d")
+        date_str_input = context.args[0]
+        # Стандартизуємо дату для видалення, щоб вона точно збігалася з БД
+        date_obj = datetime.strptime(date_str_input, "%Y-%m-%d")
+        date_str_to_delete = date_obj.strftime("%Y-%m-%d")
 
     except (IndexError, ValueError):
         await update.message.reply_text(f"⛔️ Невірний формат. Вкажіть дату у форматі `/{CMD_DELETE_DAY} РРРР-ММ-ДД` (наприклад: `/{CMD_DELETE_DAY} 2025-10-15`)")
@@ -679,8 +689,7 @@ async def delete_day_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(f"❌ Запис за **{date_str_to_delete}** для **{KNOWN_USERS[user_code]}** не знайдено або не було видалено.", parse_mode='Markdown')
 
 async def user_list_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обробник команди /ulist. Показує поточний список користувачів."""
-
+    # ... (код user_list_command) ...
     if not KNOWN_USERS:
         await update.message.reply_text("Список користувачів для обліку (KNOWN_USERS) порожній.", parse_mode='Markdown')
         return
@@ -699,8 +708,7 @@ async def user_list_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def user_delete_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обробник команди /udel. Видаляє всі записи користувача з БД."""
-
+    # ... (код user_delete_command) ...
     try:
         user_code_to_delete = context.args[0].strip().lower()
     except IndexError:
@@ -737,8 +745,7 @@ async def user_delete_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
 
 async def log_user_messages(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Логує будь-яке текстове повідомлення, яке не є командою і не є частиною діалогу."""
-
+    # ... (код log_user_messages) ...
     if update.message and update.message.text:
         chat_id = update.message.chat_id
         text = update.message.text
@@ -754,7 +761,7 @@ async def log_user_messages(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 # --- 5. ГОЛОВНА ФУНКЦІЯ ---
 
 async def set_bot_commands(application: Application):
-    """Встановлює список команд для кнопки 'Меню' в Telegram."""
+    # ... (код set_bot_commands) ...
     commands = [
         BotCommand(CMD_SWITCH_USER, f"Змінити: Обрати поточного користувача ({' / '.join(KNOWN_USERS.values())})"),
         BotCommand(CMD_HOLIDAY, f"Вихідний: Додати неробочий день (/{CMD_HOLIDAY} РРРР-ММ-ДД)"),
