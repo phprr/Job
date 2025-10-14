@@ -17,7 +17,7 @@ load_dotenv()
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 
 # КОНСТАНТИ РОЗРАХУНКУ
-PAY_RATE = 7.0   # Оплата за годину (в Євро)
+PAY_RATE = 7.0   # Оплата за годину 
 CURRENCY_SYMBOL = "€" # Нова константа для символу валюти
 
 # СКОРОЧЕНІ КОМАНДИ (УКРАЇНСЬКІ)
