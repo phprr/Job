@@ -570,18 +570,22 @@ async def monthly_summary_command(update: Update, context: ContextTypes.DEFAULT_
         'Fri': 'Пт', 'Sat': 'Сб', 'Sun': 'Нд'
     }
     
-    # Тимчасовий стовпець для коректного перетворення в datetime
-    temp_date = pd.to_datetime(df['Дата'], errors='coerce') 
+    # Тимчасовий стовпець для коректного перетворення в datetime (для сортування і дня тижня)
+    # Зберігаємо його як новий стовпець
+    df['Temp_Date_Sort'] = pd.to_datetime(df['Дата'], errors='coerce') 
 
     # Створення стовпця "День тижня"
     # Якщо дата валідна, отримуємо день тижня і перекладаємо його. Якщо NaT (вихідний), залишаємо порожнім.
-    df.insert(1, 'День тижня', temp_date.dt.strftime('%a').map(day_names).fillna(''))
+    df.insert(1, 'День тижня', df['Temp_Date_Sort'].dt.strftime('%a').map(day_names).fillna(''))
     
-    # Сортуємо за коректним типом (datetime)
-    df = df.sort_values(by=temp_date, ascending=True, na_position='last')
+    # *** ВИПРАВЛЕННЯ: Сортуємо за назвою тимчасового стовпця! ***
+    df = df.sort_values(by='Temp_Date_Sort', ascending=True, na_position='last')
+    
+    # Видаляємо допоміжний стовпець, оскільки він більше не потрібен
+    df = df.drop(columns=['Temp_Date_Sort'])
     
     # Повертаємо формат дати назад у рядок (YYYY-MM-DD), щоб "-" для вихідних також коректно відображався
-    df['Дата'] = df['Дата'].apply(lambda x: x.strftime('%Y-%m-%d') if pd.notna(x) else '-')
+    df['Дата'] = df['Дата'].apply(lambda x: x.strftime('%Y-%m-%d') if pd.notna(x) else x) # x - це '-' для NaT
 
     # 3. Розрахунок підсумків
     total_hours = df['Чистий час (год)'].sum()
