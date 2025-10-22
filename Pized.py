@@ -534,7 +534,8 @@ async def get_current_user_code(update: Update, context: ContextTypes.DEFAULT_TY
     return user_code
 
 async def monthly_summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обробник команди /zvit РРРР-ММ. Генерує та надсилає Excel-файл з коректним сортуванням."""
+    """Обробник команди /zvit РРРР-ММ. Генерує та надсилає Excel-файл з коректним сортуванням 
+    і додає стовпець з днем тижня."""
     user_code = await get_current_user_code(update, context)
     if not user_code:
         return
@@ -561,17 +562,23 @@ async def monthly_summary_command(update: Update, context: ContextTypes.DEFAULT_
         columns=['Дата', 'Початок', 'Кінець', 'Перерва (хв)', 'Чистий час (год)', currency_column_name]
     )
     
-    # 2. **КОРЕКТНЕ СОРТУВАННЯ ЗА ДАТОЮ**
-    # Перетворюємо стовпець "Дата" на тип datetime, щоб уникнути алфавітного сортування
-    try:
-        df['Дата'] = pd.to_datetime(df['Дата'])
-    except Exception as e:
-        logger.warning(f"Неможливо перетворити стовпець 'Дата' на datetime (можливо, через '-' для вихідних). Спробуємо перетворити некоректні дати на NaT: {e}")
-        # Якщо є вихідні з '-', використовуємо errors='coerce'
-        df['Дата'] = pd.to_datetime(df['Дата'], errors='coerce') 
+    # 2. **КОРЕКТНЕ СОРТУВАННЯ ЗА ДАТОЮ** та **РОЗРАХУНОК ДНЯ ТИЖНЯ**
+    
+    # Словник для перекладу англійських скорочень на українські
+    day_names = {
+        'Mon': 'Пн', 'Tue': 'Вт', 'Wed': 'Ср', 'Thu': 'Чт', 
+        'Fri': 'Пт', 'Sat': 'Сб', 'Sun': 'Нд'
+    }
+    
+    # Тимчасовий стовпець для коректного перетворення в datetime
+    temp_date = pd.to_datetime(df['Дата'], errors='coerce') 
 
+    # Створення стовпця "День тижня"
+    # Якщо дата валідна, отримуємо день тижня і перекладаємо його. Якщо NaT (вихідний), залишаємо порожнім.
+    df.insert(1, 'День тижня', temp_date.dt.strftime('%a').map(day_names).fillna(''))
+    
     # Сортуємо за коректним типом (datetime)
-    df = df.sort_values(by='Дата', ascending=True, na_position='last')
+    df = df.sort_values(by=temp_date, ascending=True, na_position='last')
     
     # Повертаємо формат дати назад у рядок (YYYY-MM-DD), щоб "-" для вихідних також коректно відображався
     df['Дата'] = df['Дата'].apply(lambda x: x.strftime('%Y-%m-%d') if pd.notna(x) else '-')
@@ -583,6 +590,7 @@ async def monthly_summary_command(update: Update, context: ContextTypes.DEFAULT_
     # Створення підсумкового рядка
     summary_row = {
         'Дата': f'РАЗОМ ({KNOWN_USERS[user_code]}):',
+        'День тижня': '', # Додаємо пусте поле для нового стовпця
         'Початок': '', 
         'Кінець': '', 
         'Перерва (хв)': '', 
