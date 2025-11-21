@@ -585,7 +585,8 @@ async def monthly_summary_command(update: Update, context: ContextTypes.DEFAULT_
     df = df.drop(columns=['Temp_Date_Sort'])
     
     # Повертаємо формат дати назад у рядок (YYYY-MM-DD), щоб "-" для вихідних також коректно відображався
-    df['Дата'] = df['Дата'].apply(lambda x: x.strftime('%Y-%m-%d') if pd.notna(x) else x) # x - це '-' для NaT
+    # Перевіряємо чи x є datetime об'єктом перед викликом strftime
+    df['Дата'] = df['Дата'].apply(lambda x: x.strftime('%Y-%m-%d') if hasattr(x, 'strftime') else x)
 
     # 3. Розрахунок підсумків
     total_hours = df['Чистий час (год)'].sum()
